@@ -43,123 +43,114 @@ module user_proj_example #(
     inout vssd1,	// User area 1 digital ground
 `endif
 
-    // Wishbone Slave ports (WB MI A)
-    input wb_clk_i,
-    input wb_rst_i,
-    input wbs_stb_i,
-    input wbs_cyc_i,
-    input wbs_we_i,
-    input [3:0] wbs_sel_i,
-    input [31:0] wbs_dat_i,
-    input [31:0] wbs_adr_i,
-    output wbs_ack_o,
-    output [31:0] wbs_dat_o,
-
-    // Logic Analyzer Signals
-    input  [127:0] la_data_in,
-    output [127:0] la_data_out,
-    input  [127:0] la_oenb,
-
     // IOs
     input  [`MPRJ_IO_PADS-1:0] io_in,
     output [`MPRJ_IO_PADS-1:0] io_out,
-    output [`MPRJ_IO_PADS-1:0] io_oeb,
+    output [`MPRJ_IO_PADS-1:0] io_oeb
 
-    // IRQ
-    output [2:0] irq
 );
     wire clk;
-    wire rst;
+    wire rstn;
+
+    wire [15:0] bcd;
+    wire [13:0] count;
+    wire [6:0] led;
 
     wire [`MPRJ_IO_PADS-1:0] io_in;
     wire [`MPRJ_IO_PADS-1:0] io_out;
     wire [`MPRJ_IO_PADS-1:0] io_oeb;
 
-    wire [31:0] rdata; 
-    wire [31:0] wdata;
-    wire [BITS-1:0] count;
+    assign count[13:4] = 10'b0;
 
-    wire valid;
-    wire [3:0] wstrb;
-    wire [31:0] la_write;
+    assign clk = io_in[10];
+    assign io_oeb[10] = 1'b1;
+    assign rstn = io_in[11];
+    assign io_oeb[11] = 1'b1;
 
-    // WB MI A
-    assign valid = wbs_cyc_i && wbs_stb_i; 
-    assign wstrb = wbs_sel_i & {4{wbs_we_i}};
-    assign wbs_dat_o = rdata;
-    assign wdata = wbs_dat_i;
-
-    // IO
-    assign io_out = count;
-    assign io_oeb = {(`MPRJ_IO_PADS-1){rst}};
-
-    // IRQ
-    assign irq = 3'b000;	// Unused
-
-    // LA
-    assign la_data_out = {{(127-BITS){1'b0}}, count};
-    // Assuming LA probes [63:32] are for controlling the count register  
-    assign la_write = ~la_oenb[63:32] & ~{BITS{valid}};
-    // Assuming LA probes [65:64] are for controlling the count clk & reset  
-    assign clk = (~la_oenb[64]) ? la_data_in[64]: wb_clk_i;
-    assign rst = (~la_oenb[65]) ? la_data_in[65]: wb_rst_i;
-
-    counter #(
-        .BITS(BITS)
-    ) counter(
-        .clk(clk),
-        .reset(rst),
-        .ready(wbs_ack_o),
-        .valid(valid),
-        .rdata(rdata),
-        .wdata(wbs_dat_i),
-        .wstrb(wstrb),
-        .la_write(la_write),
-        .la_input(la_data_in[63:32]),
-        .count(count)
-    );
+    assign io_out[18:12] = led[6:0];
+    assign io_oeb[18:12] = 7'b0;
+  
+  counter c0 (
+    .clk(clk),
+    .rstn(rstn),
+    .out(count[3:0])
+  );
+  
+  bin2bcd b0(
+    .bin(count),
+    .bcd(bcd)
+  );
+  
+  segment7 s0 (
+    .bcd(bcd[3:0]),
+    .seg(led)
+  );
 
 endmodule
-
-module counter #(
-    parameter BITS = 32
-)(
-    input clk,
-    input reset,
-    input valid,
-    input [3:0] wstrb,
-    input [BITS-1:0] wdata,
-    input [BITS-1:0] la_write,
-    input [BITS-1:0] la_input,
-    output ready,
-    output [BITS-1:0] rdata,
-    output [BITS-1:0] count
+  
+module counter (
+  	input clk,
+  	input rstn,
+        output reg[3:0] out
 );
-    reg ready;
-    reg [BITS-1:0] count;
-    reg [BITS-1:0] rdata;
-
-    always @(posedge clk) begin
-        if (reset) begin
-            count <= 0;
-            ready <= 0;
-        end else begin
-            ready <= 1'b0;
-            if (~|la_write) begin
-                count <= count + 1;
-            end
-            if (valid && !ready) begin
-                ready <= 1'b1;
-                rdata <= count;
-                if (wstrb[0]) count[7:0]   <= wdata[7:0];
-                if (wstrb[1]) count[15:8]  <= wdata[15:8];
-                if (wstrb[2]) count[23:16] <= wdata[23:16];
-                if (wstrb[3]) count[31:24] <= wdata[31:24];
-            end else if (|la_write) begin
-                count <= la_write & la_input;
-            end
-        end
-    end
-
+  
+always @ (posedge clk) begin
+    if (! rstn)
+        out <= 0;
+    else
+        out <= out + 1;
+end
+  
 endmodule
+
+module bin2bcd(
+   input [13:0] bin,
+   output reg [15:0] bcd
+   );
+   
+integer i;
+	
+always @(bin) begin
+    bcd=0;		 	
+    for (i=0;i<14;i=i+1) begin					//Iterate once for each bit in input number
+        if (bcd[3:0] >= 5) bcd[3:0] = bcd[3:0] + 3;		//If any BCD digit is >= 5, add three
+	if (bcd[7:4] >= 5) bcd[7:4] = bcd[7:4] + 3;
+	if (bcd[11:8] >= 5) bcd[11:8] = bcd[11:8] + 3;
+	if (bcd[15:12] >= 5) bcd[15:12] = bcd[15:12] + 3;
+	bcd = {bcd[14:0],bin[13-i]};				//Shift one bit, and shift in proper bit from input 
+    end
+end
+endmodule
+
+module segment7(
+     bcd,
+     seg
+    );
+     
+     //Declare inputs,outputs and internal variables.
+     input [3:0] bcd;
+     output [6:0] seg;
+     reg [6:0] seg;
+
+//always block for converting bcd digit into 7 segment format
+    always @(bcd)
+    begin
+        case (bcd) //case statement
+            0 : seg = 7'b0000001;
+            1 : seg = 7'b1001111;
+            2 : seg = 7'b0010010;
+            3 : seg = 7'b0000110;
+            4 : seg = 7'b1001100;
+            5 : seg = 7'b0100100;
+            6 : seg = 7'b0100000;
+            7 : seg = 7'b0001111;
+            8 : seg = 7'b0000000;
+            9 : seg = 7'b0000100;
+            //switch off 7 segment character when the bcd digit is not a decimal number.
+            default : seg = 7'b1111111; 
+        endcase
+    end
+    
+endmodule
+
 `default_nettype wire
